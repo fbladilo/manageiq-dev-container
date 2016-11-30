@@ -1,2 +1,2 @@
-# manageiq_dev_container
+# manageiq dev container
 ManageIQ development-environment container.
