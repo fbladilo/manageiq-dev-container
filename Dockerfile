@@ -1,63 +1,54 @@
 FROM centos:7
 ENV container docker
-MAINTAINER ManageIQ https://github.com/ManageIQ/manageiq-appliance-build
+MAINTAINER Nimrod Shneor https://github.com/nimrodshn/manageiq-dev-container
 
 # Set ENV, LANG only needed if building with docker-1.8
 ENV LANG en_US.UTF-8
 ENV TERM xterm
-#ENV RUBY_GEMS_ROOT /opt/rubies/ruby-2.3.1/lib/ruby/gems/2.3.0
-#ENV APP_ROOT /var/www/miq/vmdb
 
-# Fetch pglogical and manageiq repo
-RUN curl -sSLko /etc/yum.repos.d/ncarboni-pglogical-SCL-epel-7.repo \
-      https://copr.fedorainfracloud.org/coprs/ncarboni/pglogical-SCL/repo/epel-7/ncarboni-pglogical-SCL-epel-7.repo
-RUN curl -sSLko /etc/yum.repos.d/manageiq-ManageIQ-epel-7.repo \
-      https://copr.fedorainfracloud.org/coprs/manageiq/ManageIQ/repo/epel-7/manageiq-ManageIQ-epel-7.repo
+RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
 
-## Install EPEL repo, yum necessary packages for the build without docs, clean all caches
-RUN yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm && \
-    yum -y install centos-release-scl-rh && \
-    yum -y install --setopt=tsflags=nodocs \
-                   bison                   \
-                   bzip2                   \
-                   cmake                   \
-                   file                    \
-                   gcc-c++                 \
-                   git                     \
-                   libffi-devel            \
-                   libtool                 \
-                   libxml2-devel           \
-                   libxslt-devel           \
-                   libyaml-devel           \
-                   make                    \
-                   memcached               \
-                   net-tools               \
-                   nodejs                  \
-                   openssl-devel           \
-                   patch                   \
-                   rh-postgresql95-postgresql-server \
-                   rh-postgresql95-postgresql-devel  \
-                   rh-postgresql95-postgresql-pglogical-output \
-                   rh-postgresql95-postgresql-pglogical \
-                   rh-postgresql95-repmgr  \
-                   readline-devel          \
-                   sqlite-devel            \
-                   sysvinit-tools          \
-                   which                   \
-                   &&                      \
-    yum clean all
+RUN yum -y install                         \
+    git-all                                \
+    memcached                              \
+    postgresql-devel postgresql-server     \
+    bzip2 libffi-devel readline-devel      \
+    libxml2-devel libxslt-devel patch      \
+    sqlite-devel                           \
+    gcc-c++                                \
+    libcurl-devel                          \
+    openssl-devel                          \
+    nodejs                                 \
+    cmake                                  \
+    clean all
 
+RUN npm install -g bower
+
+# Add persistent data volume for postgres
+VOLUME [ "/var/opt/rh/rh-postgresql95/lib/pgsql/data" ]
+
+RUN (cd /lib/systemd/system/sysinit.target.wants && for i in *; do [ $i == systemd-tmpfiles-setup.service ] || rm -vf $i; done) && \
+    rm -vf /lib/systemd/system/multi-user.target.wants/* && \
+    rm -vf /etc/systemd/system/*.wants/* && \
+    rm -vf /lib/systemd/system/local-fs.target.wants/* && \
+    rm -vf /lib/systemd/system/sockets.target.wants/*udev* && \
+    rm -vf /lib/systemd/system/sockets.target.wants/*initctl* && \
+    rm -vf /lib/systemd/system/basic.target.wants/* && \
+    rm -vf /lib/systemd/system/anaconda.target.wants/*
 
 ## Enable Memchached on boot.
-RUN systemctl enable memcached appliance-initialize evmserverd evminit evm-watchdog miqvmstat miqtop
+RUN /usr/bin/memcached -uroot &
+#RUN systemctl enable memcached
+#RUN systemctl start memcached
 
 ## Enable Postgress
-RUN yum -y install postgresql-setup initdb && \
-    yum -y install grep -q '^local\s' /var/lib/pgsql/data/pg_hba.conf || echo "local all all trust" | tee -a /var/lib/pgsql/data/pg_hba.conf && \
-    yum -y install sed -i.bak 's/\(^local\s*\w*\s*\w*\s*\)\(peer$\)/\1trust/' /var/lib/pgsql/data/pg_hba.conf && \
-    yum -y install systemctl enable postgresql && \
-    yum -y install systemctl start postgresql && \
-    yum -y install -u postgres psql -c "CREATE ROLE root SUPERUSER LOGIN PASSWORD 'smartvm'"
+RUN postgresql-setup initdb && \
+    grep -q '^local\s' /var/lib/pgsql/data/pg_hba.conf || echo "local all all trust" | tee -a /var/lib/pgsql/data/pg_hba.conf && \
+    sed -i.bak 's/\(^local\s*\w*\s*\w*\s*\)\(peer$\)/\1trust/' /var/lib/pgsql/data/pg_hba.conf
+    #systemctl enable postgresql && \
+    #systemctl start postgresql
+    #postgres -D /var/lib/pgsql1/data
+    #postgres psql -c "CREATE ROLE root SUPERUSER LOGIN PASSWORD 'smartvm'"
 
 # Download chruby and chruby-install, install, setup environment, clean all
 RUN curl -sL https://github.com/postmodern/chruby/archive/v0.3.9.tar.gz | tar xz && \
@@ -73,14 +64,13 @@ RUN curl -sL https://github.com/postmodern/chruby/archive/v0.3.9.tar.gz | tar xz
     echo "chruby ruby-2.3.1" >> ~/.bash_profile && \
     rm -rf /chruby-* && \
     rm -rf /usr/local/src/* && \
-    yum clean all
+    clean all
 
 ## Install Bundler
 RUN gem install bundler
 
 ## Download manageiq
 RUN mkdir -p /manageiq && git clone --depth 1 https://github.com/ManageIQ/manageiq /manageiq
-RUN mkdir -p /manageiq
 ADD . /manageiq
 
 ## Change WORKDIR to clone dir, copy docker_setup, start all, docker_setup, shutdown all, clean all
